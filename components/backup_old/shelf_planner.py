@@ -84,16 +84,16 @@ def _issue_texts(analysis: ShelfAnalysis) -> list[str]:
 def _row_guidance(row, analysis: ShelfAnalysis) -> tuple[str, tuple[int, int, int, int], str]:
     """Match visual guidance to the actual issues Gemini reported.
 
-    GREEN = NO ISSUE DETECTED / GOOD AREA
-    YELLOW = CHECK THIS AREA / REVIEW
-    RED = ACTION REQUIRED / PROBLEM
+    Empty shelf space remains a red action. Other colors are driven by the
+    detected issue text, so a lower-basket problem cannot accidentally appear
+    green just because products are present there.
     """
     texts = _issue_texts(analysis)
     zone = str(getattr(row, "vertical_zone", "")).lower()
 
-    # Empty space is a direct visual action and should remain red action.
+    # Empty space is a direct visual action and should remain strongest.
     if getattr(row, "empty_spaces", None):
-        return "🔴 ACTION REQUIRED", (220, 38, 38, 125), "CHANGE / FILL"
+        return "FILL THIS SPACE", (220, 38, 38, 150), "CHANGE / FILL"
 
     # Match the specific problems shown in the analysis cards.
     stacking_issue = any(
@@ -106,23 +106,24 @@ def _row_guidance(row, analysis: ShelfAnalysis) -> tuple[str, tuple[int, int, in
     )
 
     if stacking_issue and zone in {"top", "eye level"}:
-        return "🟡 CHECK THIS AREA", (245, 166, 35, 110), "CHECK / REVIEW"
+        return "LOWER TALL STACKS", (245, 166, 35, 150), "CHECK / REVIEW"
 
     if basket_issue and zone in {"lower level", "unclear"}:
-        return "🟡 CHECK THIS AREA", (245, 166, 35, 110), "CHECK / REVIEW"
+        return "SORT MIXED ITEMS", (245, 166, 35, 150), "CHECK / REVIEW"
 
-    # If Gemini reports a general organization problem, mark row for review (yellow).
+    # If Gemini reports a general organization problem, do not call the row
+    # perfect; mark it for review instead of showing a misleading green area.
     organization_issue = any(
         any(word in text for word in ("not clearly grouped", "mixed", "disorganized", "organization", "misplaced"))
         for text in texts
     )
     if organization_issue and zone in {"lower level", "unclear"}:
-        return "🟡 CHECK THIS AREA", (245, 166, 35, 110), "CHECK / REVIEW"
+        return "CHECK THIS AREA", (245, 166, 35, 150), "CHECK / REVIEW"
 
     if getattr(row, "products", None):
-        return "🟢 NO ISSUE DETECTED", (35, 140, 65, 80), "KEEP / GOOD"
+        return "NO ISSUE DETECTED", (35, 140, 65, 85), "KEEP / GOOD"
 
-    return "🟡 CHECK THIS AREA", (245, 166, 35, 110), "CHECK / REVIEW"
+    return "CHECK THIS AREA", (245, 166, 35, 145), "CHECK / REVIEW"
 
 
 def _create_recommended_image(image: bytes, analysis: ShelfAnalysis) -> Image.Image | None:
@@ -179,7 +180,6 @@ def _create_recommended_image(image: bytes, analysis: ShelfAnalysis) -> Image.Im
         )
 
         message, color, guidance = _row_guidance(row, analysis)
-        # Apply translucent green, yellow, or red overlay to the row
         draw.rectangle((0, y0, width, y1), fill=color)
 
         # White guide line around each analyzed row.
@@ -192,19 +192,10 @@ def _create_recommended_image(image: bytes, analysis: ShelfAnalysis) -> Image.Im
         text_h = text_bbox[3] - text_bbox[1]
         box_x1 = min(width - 12, 18 + text_w + 26)
         box_y1 = label_box_y + text_h + 18
-        
-        badge_bg = (20, 20, 20, 210)
-        if guidance == "KEEP / GOOD":
-            badge_bg = (20, 90, 45, 220)
-        elif guidance == "CHECK / REVIEW":
-            badge_bg = (130, 85, 15, 220)
-        elif guidance == "CHANGE / FILL":
-            badge_bg = (140, 20, 20, 220)
-
         draw.rounded_rectangle(
             (12, label_box_y, box_x1, box_y1),
             radius=8,
-            fill=badge_bg,
+            fill=(20, 20, 20, 210),
         )
         draw.text(
             (24, label_box_y + 7),
@@ -213,7 +204,7 @@ def _create_recommended_image(image: bytes, analysis: ShelfAnalysis) -> Image.Im
             fill=(255, 255, 255, 255),
         )
 
-        # Add visual markers / arrows for status
+        # Add a simple arrow for rows needing action.
         if row.empty_spaces:
             arrow_y = (y0 + y1) // 2
             arrow_start = max(20, width - 210)
@@ -233,39 +224,24 @@ def _create_recommended_image(image: bytes, analysis: ShelfAnalysis) -> Image.Im
             )
             draw.text(
                 (max(20, width - 360), arrow_y - 43),
-                "FILL THIS SPACE",
+                "PUT PRODUCTS HERE",
                 font=small_font,
                 fill=(255, 255, 255, 255),
             )
         elif guidance == "KEEP / GOOD":
-            marker_x = width - 110
-            marker_y = max(y0 + 15, (y0 + y1) // 2 - 16)
-            draw.rounded_rectangle(
-                (marker_x, marker_y, marker_x + 95, marker_y + 32),
-                radius=6,
-                fill=(30, 140, 65, 230),
+            # A subtle green marker helps workers understand that this area
+            # can stay as it is.
+            marker_x = width - 58
+            marker_y = max(y0 + 20, (y0 + y1) // 2 - 18)
+            draw.ellipse(
+                (marker_x, marker_y, marker_x + 34, marker_y + 34),
+                fill=(30, 150, 70, 230),
                 outline=(255, 255, 255, 255),
-                width=2,
+                width=3,
             )
             draw.text(
-                (marker_x + 12, marker_y + 6),
-                "✓ KEEP IT",
-                font=small_font,
-                fill=(255, 255, 255, 255),
-            )
-        elif guidance == "CHECK / REVIEW":
-            marker_x = width - 120
-            marker_y = max(y0 + 15, (y0 + y1) // 2 - 16)
-            draw.rounded_rectangle(
-                (marker_x, marker_y, marker_x + 105, marker_y + 32),
-                radius=6,
-                fill=(220, 140, 20, 230),
-                outline=(255, 255, 255, 255),
-                width=2,
-            )
-            draw.text(
-                (marker_x + 10, marker_y + 6),
-                "! CHECK IT",
+                (marker_x + 9, marker_y + 2),
+                "✓",
                 font=small_font,
                 fill=(255, 255, 255, 255),
             )
@@ -274,9 +250,9 @@ def _create_recommended_image(image: bytes, analysis: ShelfAnalysis) -> Image.Im
     legend_y = max(8, height - 42)
     draw.rectangle((0, legend_y, width, height), fill=(18, 30, 27, 220))
     legend = [
-        ("GREEN", (35, 140, 65, 255), "No issue detected (KEEP IT)"),
-        ("YELLOW", (245, 166, 35, 255), "Check / review (CHECK IT)"),
-        ("RED", (220, 38, 38, 255), "Action required (CHANGE IT)"),
+        ("GREEN", (35, 140, 65, 255), "No issue detected"),
+        ("YELLOW", (245, 166, 35, 255), "Check / review"),
+        ("RED", (220, 38, 38, 255), "Change / fill"),
     ]
     x = 18
     for name, color, meaning in legend:
@@ -509,127 +485,3 @@ def render_scenario_comparison(
         f"<div class='analysis-summary'>{html.escape(scenario_explanation(scenario))}</div>",
         unsafe_allow_html=True,
     )
-
-
-def create_empty_shelf_plan_image(image_bytes: bytes, plan) -> Image.Image | None:
-    try:
-        source = Image.open(BytesIO(image_bytes)).convert("RGB")
-    except Exception:
-        return None
-
-    canvas = source.copy().convert("RGBA")
-    overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    width, height = canvas.size
-    shelf_count = max(1, getattr(plan, "shelf_count", 4))
-    
-    header_h = max(56, height // 10)
-    title_font = _load_font(max(20, width // 42))
-    label_font = _load_font(max(15, width // 65))
-    small_font = _load_font(max(12, width // 85))
-
-    draw.rectangle((0, 0, width, header_h), fill=(24, 43, 73, 230))
-    draw.text((18, 10), "VISUAL PLACEMENT PLAN", font=title_font, fill=(255, 255, 255, 255))
-    draw.text((18, header_h - 22), "Where to put each product before filling your shelf", font=small_font, fill=(210, 230, 255, 255))
-
-    row_h = max(1, (height - header_h) // shelf_count)
-
-    zone_colors = {
-        "TOP": (138, 43, 226, 110),
-        "EYE LEVEL": (217, 95, 39, 120),
-        "HAND LEVEL": (46, 125, 50, 110),
-        "LOWER LEVEL": (30, 136, 229, 110),
-        "BOTTOM LEVEL": (109, 76, 65, 110),
-    }
-
-    def get_row_info(idx: int, count: int) -> tuple[str, str]:
-        """Returns (zone_key, display_label) for row index idx out of count rows."""
-        if count == 1:
-            return "TOP", "TOP LEVEL"
-        if count == 2:
-            return ("TOP", "TOP LEVEL") if idx == 0 else ("BOTTOM LEVEL", "BOTTOM LEVEL")
-        if count == 3:
-            if idx == 0:
-                return "TOP", "TOP LEVEL"
-            if idx == 1:
-                return "EYE LEVEL", "EYE LEVEL"
-            return "BOTTOM LEVEL", "BOTTOM LEVEL"
-        if count == 4:
-            if idx == 0:
-                return "TOP", "TOP LEVEL"
-            if idx == 1:
-                return "EYE LEVEL", "EYE LEVEL"
-            if idx == 2:
-                return "HAND LEVEL", "HAND LEVEL"
-            return "BOTTOM LEVEL", "BOTTOM LEVEL"
-        # 5 or more
-        if idx == 0:
-            return "TOP", "TOP LEVEL"
-        if idx == 1:
-            return "EYE LEVEL", "EYE LEVEL"
-        if idx == 2:
-            return "HAND LEVEL", "HAND LEVEL"
-        if idx == count - 1:
-            return "BOTTOM LEVEL", "BOTTOM LEVEL"
-        return "LOWER LEVEL", "LOWER LEVEL"
-
-    def map_placement_to_row(zone_str: str, count: int) -> int:
-        z = str(zone_str).strip().upper()
-        if "TOP" in z:
-            return 0
-        if "EYE" in z:
-            return 1 if count >= 3 else 0
-        if "HAND" in z or "MIDDLE" in z:
-            return 2 if count >= 4 else (1 if count == 3 else 0)
-        if "BOTTOM" in z or "FLOOR" in z:
-            return count - 1
-        if "LOWER" in z:
-            return count - 2 if count >= 5 else (count - 1)
-        return 0
-
-    # Map categories from plan.placements strictly to their target row
-    row_categories: list[list[str]] = [[] for _ in range(shelf_count)]
-    placements = getattr(plan, "placements", [])
-    
-    for p in placements:
-        cat = getattr(p, "category", "")
-        zone = getattr(p, "recommended_zone", "Eye Level")
-        if cat:
-            r_idx = map_placement_to_row(zone, shelf_count)
-            if cat not in row_categories[r_idx]:
-                row_categories[r_idx].append(cat)
-
-    for i in range(shelf_count):
-        y0 = header_h + i * row_h
-        y1 = height if i == shelf_count - 1 else header_h + (i + 1) * row_h
-
-        zone_key, display_label = get_row_info(i, shelf_count)
-        color = zone_colors.get(zone_key, (50, 50, 50, 110))
-
-        draw.rectangle((0, y0, width, y1), fill=color)
-        draw.line((0, y0, width, y0), fill=(255, 255, 255, 230), width=3)
-
-        categories_here = row_categories[i]
-        if categories_here:
-            cat_str = " + ".join(categories_here).upper()
-            badge_text = f"{cat_str} → {display_label}"
-        else:
-            badge_text = f"OPEN SPACE → {display_label}"
-
-        bbox = draw.textbbox((0, 0), badge_text, font=label_font)
-        bw = bbox[2] - bbox[0]
-        bh = bbox[3] - bbox[1]
-
-        by0 = y0 + 12
-        draw.rounded_rectangle((14, by0, min(width - 14, 28 + bw), by0 + bh + 16), radius=6, fill=(15, 23, 42, 230))
-        draw.text((22, by0 + 6), badge_text, font=label_font, fill=(255, 255, 255, 255))
-
-        arrow_y = (y0 + y1) // 2
-        ax_end = max(80, width - 40)
-        ax_start = max(20, width - 150)
-        draw.line((ax_start, arrow_y, ax_end, arrow_y), fill=(255, 255, 255, 255), width=6)
-        draw.polygon([(ax_end, arrow_y), (ax_end - 18, arrow_y - 12), (ax_end - 18, arrow_y + 12)], fill=(255, 255, 255, 255))
-
-    return Image.alpha_composite(canvas, overlay).convert("RGB")
-

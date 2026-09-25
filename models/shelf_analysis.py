@@ -51,3 +51,17 @@ class ShelfAnalysis(BaseModel):
     priority_actions: list[Recommendation] = Field(default_factory=list)
     summary: str = Field(min_length=1)
     shelf_rows: list[ShelfRow] = Field(default_factory=list)
+
+
+class CategoryPlacement(BaseModel):
+    category: str = Field(min_length=1)
+    recommended_zone: Literal["Top", "Eye Level", "Hand Level", "Lower Level", "Bottom"] = "Eye Level"
+    reason: str = Field(min_length=1)
+    tip: str = Field(default="", min_length=0)
+
+
+class EmptyShelfPlan(BaseModel):
+    shelf_count: int = Field(default=4, ge=1)
+    summary: str = Field(min_length=1)
+    placements: list[CategoryPlacement] = Field(default_factory=list)
+
